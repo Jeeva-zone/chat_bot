@@ -1,0 +1,64 @@
+{
+  "provider": {
+    "name": "tokenharbor",
+    "base_url": "https://tokenharbor.ai/v1",
+    "chat_endpoint": "/chat/completions",
+    "api_style": "openai-compatible"
+  },
+
+  "models": {
+    "qwen": {
+      "id": "qwen3.8-flash:free",
+      "enabled": true,
+      "modalities": ["text", "image", "video"],
+      "input_types": ["text", "image", "video"],
+      "use_for": [
+        "general_text",
+        "image_understanding",
+        "video_understanding"
+      ]
+    },
+
+    "deepseek": {
+      "id": "deepseek-v4.1-flash:free",
+      "enabled": true,
+      "modalities": ["text", "image"],
+      "input_types": ["text", "image"],
+      "use_for": [
+        "general_text",
+        "image_understanding"
+      ]
+    },
+
+    "mimo": {
+      "id": "mimo-v2.6-flash:free",
+      "enabled": true,
+      "modalities": ["text"],
+      "input_types": ["text"],
+      "use_for": [
+        "general_text"
+      ]
+    }
+  },
+
+  "routing": {
+    "text": [
+      "qwen",
+      "deepseek",
+      "mimo"
+    ],
+    "image": [
+      "qwen",
+      "deepseek"
+    ],
+    "video": [
+      "qwen"
+    ]
+  },
+
+  "defaults": {
+    "text": "qwen",
+    "image": "qwen",
+    "video": "qwen"
+  }
+}
