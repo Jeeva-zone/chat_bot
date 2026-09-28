@@ -7,9 +7,21 @@ import SidePanel from "@/components/SidePanel";
 import SettingsDrawer from "@/components/SettingsDrawer";
 import Composer from "@/components/Composer";
 import MessageItem from "@/components/MessageItem";
-import { load, save, STORAGE_KEYS } from "@/lib/storage";
-import { DEFAULT_SETTINGS, defaultTeam, AGENT_PRESETS } from "@/lib/defaults";
-import { fetchModelConfig, normalizeModelConfig } from "@/lib/models";
+import { load, save, STORAGE_KEYS, loadProviderKeys } from "@/lib/storage";
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_CUSTOM_PROVIDER,
+  defaultTeam,
+  AGENT_PRESETS,
+} from "@/lib/defaults";
+import {
+  fetchModelConfig,
+  normalizeModelConfig,
+  resolveModel,
+  modelValue,
+  mergeLiveModels,
+  joinUrl,
+} from "@/lib/models";
 import { streamChat } from "@/lib/client";
 import { conversationToMarkdown } from "@/lib/export";
 import { downloadText, stamp } from "@/lib/download";
@@ -37,12 +49,20 @@ function historyFrom(messages) {
   const out = [];
   for (const m of messages) {
     if (m.role === "user") {
-      out.push({ role: "user", content: buildUserContent(m.content, m.attachments) });
+      out.push({
+        role: "user",
+        content: buildUserContent(m.content, m.attachments),
+      });
     } else if (m.role === "assistant") {
-      if (m.content && !m.error) out.push({ role: "assistant", content: m.content });
+      if (m.content && !m.error)
+        out.push({ role: "assistant", content: m.content });
     } else if (m.role === "team") {
-      out.push({ role: "user", content: buildUserContent(m.content, m.attachments) });
-      if (m.summary?.content) out.push({ role: "assistant", content: m.summary.content });
+      out.push({
+        role: "user",
+        content: buildUserContent(m.content, m.attachments),
+      });
+      if (m.summary?.content)
+        out.push({ role: "assistant", content: m.summary.content });
     }
   }
   return out;
@@ -50,17 +70,17 @@ function historyFrom(messages) {
 
 export default function Page() {
   const [hydrated, setHydrated] = useState(false);
-  const [apiKey, setApiKey] = useState("");
+  const [providerKeys, setProviderKeys] = useState({});
   const [settings, setSettings] = useState({
     ...DEFAULT_SETTINGS,
-    singleModel: "",
-    theme: "light",
+    customProvider: DEFAULT_CUSTOM_PROVIDER,
   });
   const [team, setTeam] = useState(EMPTY_TEAM);
   const [messages, setMessages] = useState([]);
   const [mode, setMode] = useState("single");
 
   const [modelConfig, setModelConfig] = useState(null);
+  const [liveModels, setLiveModels] = useState({});
   const [modelsError, setModelsError] = useState("");
   const [loadingModels, setLoadingModels] = useState(false);
 
@@ -75,9 +95,19 @@ export default function Page() {
 
   // ---------------------------------------------------------------- hydrate
   useEffect(() => {
-    setApiKey(load(STORAGE_KEYS.apiKey, ""));
     const savedSettings = load(STORAGE_KEYS.settings, null);
-    if (savedSettings) setSettings((s) => ({ ...s, ...savedSettings }));
+    if (savedSettings) {
+      setSettings((s) => ({
+        ...s,
+        ...savedSettings,
+        customProvider: {
+          ...DEFAULT_CUSTOM_PROVIDER,
+          ...(savedSettings.customProvider || {}),
+        },
+      }));
+    }
+    setProviderKeys(loadProviderKeys("tokenharbor"));
+    setLiveModels(load(STORAGE_KEYS.liveModels, {}) || {});
     const savedTeam = load(STORAGE_KEYS.team, null);
     setTeam(
       savedTeam?.agents?.length
@@ -108,8 +138,11 @@ export default function Page() {
     if (hydrated) save(STORAGE_KEYS.history, messages.slice(-40));
   }, [messages, hydrated]);
   useEffect(() => {
-    if (hydrated) save(STORAGE_KEYS.apiKey, apiKey);
-  }, [apiKey, hydrated]);
+    if (hydrated) save(STORAGE_KEYS.providerKeys, providerKeys);
+  }, [providerKeys, hydrated]);
+  useEffect(() => {
+    if (hydrated) save(STORAGE_KEYS.liveModels, liveModels);
+  }, [liveModels, hydrated]);
 
   // ----------------------------------------------------------------- theme
   useEffect(() => {
@@ -117,6 +150,60 @@ export default function Page() {
     if (settings.theme === "dark") root.classList.add("dark");
     else root.classList.remove("dark");
   }, [settings.theme]);
+
+  // ------------------------------------------------------ effective config
+  // The bundled registry is a seed. On top of it we layer:
+  //   - the user's custom provider (base URL, endpoint, model ids)
+  //   - live model lists fetched from each provider
+  const config = useMemo(() => {
+    if (!modelConfig) return null;
+    const custom = {
+      ...DEFAULT_CUSTOM_PROVIDER,
+      ...(settings.customProvider || {}),
+    };
+
+    const providers = modelConfig.providers.map((p) => {
+      if (p.custom) {
+        const baseUrl = String(custom.baseUrl || "").replace(/\/+$/, "");
+        const chatEndpoint = custom.chatEndpoint || "/chat/completions";
+        const label = custom.label || "Custom provider";
+        const models = (custom.models || []).map((m) => ({
+          key: m.id,
+          id: m.id,
+          value: modelValue(p.key, m.id),
+          providerKey: p.key,
+          providerLabel: label,
+          label: m.label || m.id,
+          enabled: true,
+          isDefault: false,
+          modalities: ["text"],
+          inputTypes: ["text"],
+          useFor: [],
+          context: null,
+          free: false,
+        }));
+        return {
+          ...p,
+          label,
+          baseUrl,
+          chatEndpoint,
+          chatUrl: joinUrl(baseUrl, chatEndpoint),
+          modelsUrl: joinUrl(baseUrl, custom.modelsEndpoint || "/models"),
+          models,
+        };
+      }
+      const live = liveModels[p.key];
+      if (Array.isArray(live) && live.length) {
+        return { ...p, models: mergeLiveModels(p, live) };
+      }
+      return p;
+    });
+
+    const models = providers.flatMap((p) => p.models.filter((m) => m.enabled));
+    const defaultModelId = modelConfig.defaultModelId || models[0]?.value || "";
+
+    return { ...modelConfig, providers, models, defaultModelId };
+  }, [modelConfig, settings.customProvider, liveModels]);
 
   // ---------------------------------------------------------- model registry
   const loadModels = useCallback(
@@ -129,22 +216,13 @@ export default function Page() {
           cfg = normalizeModelConfig(rawJson);
           save(STORAGE_KEYS.modelsJson, rawJson);
         } else {
-          const url = overrideUrl || settings.modelsUrl;
-          if (url && url.startsWith("data:")) {
-            throw new Error("Unsupported models source");
-          }
-          cfg = await fetchModelConfig(url);
+          cfg = await fetchModelConfig(overrideUrl || settings.modelsUrl);
         }
         setModelConfig(cfg);
         setSettings((s) =>
-          s.singleModel && cfg.models.some((m) => m.id === s.singleModel)
+          s.singleModel && cfg.models.some((m) => m.value === s.singleModel)
             ? s
             : { ...s, singleModel: cfg.defaultModelId }
-        );
-        setTeam((t) =>
-          t.agents.some((a) => a.model)
-            ? t
-            : { ...t, agents: t.agents.map((a) => ({ ...a, model: cfg.defaultModelId })) }
         );
       } catch (err) {
         setModelsError(err?.message || "Could not load models.json");
@@ -158,9 +236,10 @@ export default function Page() {
   useEffect(() => {
     const custom = load(STORAGE_KEYS.modelsJson, null);
     if (custom) {
-      setModelConfig(normalizeModelConfig(custom));
+      const cfg = normalizeModelConfig(custom);
+      setModelConfig(cfg);
       setSettings((s) =>
-        s.singleModel ? s : { ...s, singleModel: normalizeModelConfig(custom).defaultModelId }
+        s.singleModel ? s : { ...s, singleModel: cfg.defaultModelId }
       );
     } else {
       loadModels();
@@ -168,24 +247,52 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fill in any blank agent/synthesis model once the registry is known.
+  useEffect(() => {
+    const d = config?.defaultModelId;
+    if (!d) return;
+    setTeam((t) => {
+      let changed = false;
+      const agents = t.agents.map((a) => {
+        if (!a.model) {
+          changed = true;
+          return { ...a, model: d };
+        }
+        return a;
+      });
+      let synth = t.synth;
+      if (!synth?.model) {
+        synth = { ...synth, model: d };
+        changed = true;
+      }
+      return changed ? { ...t, agents, synth } : t;
+    });
+  }, [config?.defaultModelId]);
+
   // ------------------------------------------------------------- scrolling
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 220;
-    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (nearBottom)
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages]);
 
   // ---------------------------------------------------------------- helpers
   const patchMessage = useCallback((id, patch) => {
-    setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+    );
   }, []);
 
   const patchStep = useCallback((msgId, index, patch) => {
     setMessages((prev) =>
       prev.map((m) =>
         m.id === msgId
-          ? { ...m, steps: m.steps.map((s, i) => (i === index ? { ...s, ...patch } : s)) }
+          ? {
+              ...m,
+              steps: m.steps.map((s, i) => (i === index ? { ...s, ...patch } : s)),
+            }
           : m
       )
     );
@@ -213,7 +320,9 @@ export default function Page() {
           ? {
               ...m,
               steps: m.steps.map((s, i) =>
-                i === index ? { ...s, reasoning: (s.reasoning || "") + delta } : s
+                i === index
+                  ? { ...s, reasoning: (s.reasoning || "") + delta }
+                  : s
               ),
             }
           : m
@@ -229,13 +338,50 @@ export default function Page() {
     );
   }, []);
 
+  /** Everything needed to call a model: provider, key, endpoint, headers. */
+  const resolveTarget = useCallback(
+    (value) => {
+      const { provider, model } = resolveModel(config, value);
+      if (!provider || !model) return null;
+      return {
+        provider,
+        model,
+        apiKey: providerKeys[provider.key] || "",
+        endpoint: provider.chatUrl,
+        headers: provider.headers || null,
+      };
+    },
+    [config, providerKeys]
+  );
+
   const callModel = useCallback(
-    async ({ model, systemPrompt, temperature, history, onDelta, onReasoning, signal }) => {
+    async ({
+      modelValue: mv,
+      systemPrompt,
+      temperature,
+      history,
+      onDelta,
+      onReasoning,
+      signal,
+    }) => {
+      const target = resolveTarget(mv);
+      if (!target) throw new Error("No model selected.");
+      if (!target.endpoint) {
+        throw new Error(
+          `${target.provider.label} has no base URL configured. Set it in Settings → Providers.`
+        );
+      }
+      if (!target.apiKey) {
+        throw new Error(
+          `No API key for ${target.provider.label}. Add it in Settings → Providers.`
+        );
+      }
       return streamChat(
         {
-          apiKey,
-          endpoint: settings.endpoint,
-          model,
+          apiKey: target.apiKey,
+          endpoint: target.endpoint,
+          headers: target.headers,
+          model: target.model.id,
           messages: [{ role: "system", content: systemPrompt || "" }, ...history],
           temperature: temperature ?? settings.temperature,
           max_tokens: settings.maxTokens,
@@ -244,27 +390,26 @@ export default function Page() {
         { onDelta, onReasoning, signal }
       );
     },
-    [apiKey, settings.endpoint, settings.temperature, settings.maxTokens, settings.stream]
-  );
-
-  const models = useMemo(
-    () =>
-      modelConfig?.enabledModels?.length ? modelConfig.enabledModels : modelConfig?.models || [],
-    [modelConfig]
+    [resolveTarget, settings.temperature, settings.maxTokens, settings.stream]
   );
 
   // ------------------------------------------------------------ single chat
   const runSingle = useCallback(
-    async ({ history, content, msgId, model, systemPrompt, temperature }) => {
+    async ({ history, content, msgId, mv, systemPrompt, temperature }) => {
       const controller = new AbortController();
       abortRef.current = controller;
       setBusy(true);
-      patchMessage(msgId, { content: "", reasoning: "", status: "streaming", error: null });
+      patchMessage(msgId, {
+        content: "",
+        reasoning: "",
+        status: "streaming",
+        error: null,
+      });
       try {
         let acc = "";
         let thought = "";
         const res = await callModel({
-          model,
+          modelValue: mv,
           systemPrompt,
           temperature,
           history: [...history, { role: "user", content }],
@@ -310,7 +455,10 @@ export default function Page() {
 
       for (let i = 0; i < agents.length; i++) {
         const agent = agents[i];
-        patchStep(msgId, i, { status: "streaming", startedAt: new Date().toISOString() });
+        patchStep(msgId, i, {
+          status: "streaming",
+          startedAt: new Date().toISOString(),
+        });
 
         const pkg =
           i === 0
@@ -323,7 +471,8 @@ export default function Page() {
                 "# Team context (earlier agents)",
                 "",
                 ...transcript.map(
-                  (t) => `## ${t.name} (${t.role}) — \`${t.model}\`\n\n${t.content}`
+                  (t) =>
+                    `## ${t.name} (${t.role}) — \`${t.providerLabel} / ${t.model}\`\n\n${t.content}`
                 ),
                 "",
                 "---",
@@ -335,7 +484,7 @@ export default function Page() {
         try {
           let acc = "";
           const res = await callModel({
-            model: agent.model,
+            modelValue: agent.model,
             systemPrompt: agent.systemPrompt,
             temperature: agent.temperature,
             history: [...history, { role: "user", content: pkg }],
@@ -353,10 +502,12 @@ export default function Page() {
             reasoning: res.reasoning || undefined,
             endedAt: new Date().toISOString(),
           });
+          const t = resolveTarget(agent.model);
           transcript.push({
             name: agent.name,
             role: agent.role,
-            model: agent.model,
+            model: t?.model.id || agent.model,
+            providerLabel: t?.provider.label || "",
             content: final,
           });
           produced += 1;
@@ -364,13 +515,16 @@ export default function Page() {
           const aborted = err?.name === "AbortError";
           patchStep(msgId, i, {
             status: aborted ? "aborted" : "error",
-            error: aborted ? "Stopped by user." : err?.message || "Request failed",
+            error: aborted
+              ? "Stopped by user."
+              : err?.message || "Request failed",
             endedAt: new Date().toISOString(),
           });
           transcript.push({
             name: agent.name,
             role: agent.role,
             model: agent.model,
+            providerLabel: "",
             content: `_(${agent.name} failed: ${err?.message || "error"})_`,
           });
           if (aborted) break;
@@ -400,7 +554,7 @@ export default function Page() {
           let acc = "";
           let thought = "";
           const res = await callModel({
-            model: synth.model || agents[0].model,
+            modelValue: synth.model || agents[0].model,
             systemPrompt: synth.systemPrompt,
             temperature: synth.temperature ?? 0.4,
             history: [...history, { role: "user", content: pkg }],
@@ -423,7 +577,9 @@ export default function Page() {
           const aborted = err?.name === "AbortError";
           patchSummary(msgId, {
             status: aborted ? "skipped" : "error",
-            error: aborted ? "Stopped by user." : err?.message || "Request failed",
+            error: aborted
+              ? "Stopped by user."
+              : err?.message || "Request failed",
           });
         }
       } else if (!synthEnabled) {
@@ -441,38 +597,52 @@ export default function Page() {
       appendStepReasoning,
       patchSummary,
       patchMessage,
+      resolveTarget,
     ]
   );
 
   // ------------------------------------------------------------------ send
   const sendMessage = async ({ text, attachments }) => {
-    if (!apiKey) {
-      setDrawerOpen(true);
-      return;
-    }
     const content = buildUserContent(text, attachments);
     const history = historyFrom(messages);
 
     if (mode === "single") {
-      const model = settings.singleModel || modelConfig?.defaultModelId || models[0]?.id;
-      if (!model) {
+      const mv = settings.singleModel || config?.defaultModelId;
+      const target = mv ? resolveTarget(mv) : null;
+      if (!target) {
         setModelsError("No model available — check models.json.");
+        return;
+      }
+      if (!target.apiKey) {
+        setDrawerOpen(true);
         return;
       }
       const assistantMsg = {
         id: uid(),
         role: "assistant",
         content: "",
-        model,
+        model: target.model.id,
+        providerKey: target.provider.key,
+        providerLabel: target.provider.label,
         status: "streaming",
         createdAt: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, { id: uid(), role: "user", content: text, attachments, createdAt: new Date().toISOString() }, assistantMsg]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: uid(),
+          role: "user",
+          content: text,
+          attachments,
+          createdAt: new Date().toISOString(),
+        },
+        assistantMsg,
+      ]);
       await runSingle({
         history,
         content,
         msgId: assistantMsg.id,
-        model,
+        mv,
         systemPrompt: settings.systemPrompt,
         temperature: settings.temperature,
       });
@@ -485,7 +655,7 @@ export default function Page() {
         id: uid(),
         name: a.name || "Agent",
         role: a.role || "",
-        model: a.model || models[0]?.id || modelConfig?.defaultModelId,
+        model: a.model || config?.defaultModelId,
         systemPrompt: a.systemPrompt,
         temperature: a.temperature,
       }));
@@ -494,8 +664,23 @@ export default function Page() {
       alert("AI Team mode needs at least one enabled agent.");
       return;
     }
-    if (!models.length) {
-      setModelsError("No model available — check models.json.");
+
+    // Warn early if any agent's provider is missing a key.
+    const missing = [
+      ...new Set(
+        agents
+          .map((a) => resolveTarget(a.model))
+          .filter((t) => t && !t.apiKey)
+          .map((t) => t.provider.label)
+      ),
+    ];
+    if (missing.length) {
+      alert(
+        `These providers have no API key yet: ${missing.join(
+          ", "
+        )}. Add keys in Settings → Providers, or point those agents at a connected provider.`
+      );
+      setDrawerOpen(true);
       return;
     }
 
@@ -507,16 +692,23 @@ export default function Page() {
       attachments,
       status: "streaming",
       createdAt: new Date().toISOString(),
-      steps: agents.map((a) => ({
-        id: a.id,
-        name: a.name,
-        role: a.role,
-        model: a.model,
-        content: "",
-        status: "pending",
-      })),
+      steps: agents.map((a) => {
+        const t = resolveTarget(a.model);
+        return {
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          model: t?.model.id || a.model,
+          providerLabel: t?.provider.label || "",
+          content: "",
+          status: "pending",
+        };
+      }),
       summary: {
-        model: team.synth.model || models[0]?.id,
+        model:
+          resolveTarget(team.synth.model)?.model.id ||
+          resolveTarget(agents[0].model)?.model.id ||
+          "",
         content: "",
         status: team.synth.enabled === false ? "skipped" : "pending",
       },
@@ -527,10 +719,7 @@ export default function Page() {
       content,
       msgId,
       agents,
-      synth: {
-        ...team.synth,
-        model: team.synth.model || models[0]?.id,
-      },
+      synth: { ...team.synth, model: team.synth.model || agents[0].model },
     });
   };
 
@@ -542,15 +731,16 @@ export default function Page() {
   const regenerate = (msgId) => {
     const idx = messages.findIndex((m) => m.id === msgId);
     if (idx < 1) return;
+    const target = messages[idx];
     const prev = messages[idx - 1];
     const history = historyFrom(messages.slice(0, idx - 1));
+
     if (prev?.role === "team") {
-      // Re-run the whole pipeline with the same task.
       const agents = (prev.steps || []).map((s, i) => ({
         id: s.id,
         name: s.name,
         role: s.role,
-        model: s.model,
+        model: team.agents[i]?.model || s.model,
         systemPrompt: team.agents[i]?.systemPrompt || "",
         temperature: team.agents[i]?.temperature,
       }));
@@ -560,15 +750,22 @@ export default function Page() {
         content: buildUserContent(prev.content, prev.attachments),
         msgId: prev.id,
         agents,
-        synth: { ...team.synth, model: team.synth.model || models[0]?.id },
+        synth: { ...team.synth, model: team.synth.model || agents[0].model },
       });
       return;
     }
+
+    // Rebuild the composite picker value from the stored provider + model id.
+    const mv =
+      target.providerKey && target.model
+        ? modelValue(target.providerKey, target.model)
+        : settings.singleModel;
+
     runSingle({
       history,
       content: buildUserContent(prev.content, prev.attachments),
       msgId,
-      model: messages[idx].model || settings.singleModel,
+      mv,
       systemPrompt: settings.systemPrompt,
       temperature: settings.temperature,
     });
@@ -580,8 +777,8 @@ export default function Page() {
       `chat-${stamp()}.md`,
       conversationToMarkdown(messages, {
         mode,
-        model: settings.singleModel,
-        endpoint: settings.endpoint,
+        model: resolveTarget(settings.singleModel)?.model.id || settings.singleModel,
+        endpoint: resolveTarget(settings.singleModel)?.endpoint || "",
       })
     );
   };
@@ -600,10 +797,39 @@ export default function Page() {
     }
   };
 
-  const disabledReason = !apiKey
-    ? "Add your API key in Settings first"
-    : models.length === 0
-    ? "No models loaded"
+  const onProviderKeyChange = (providerKey, value) => {
+    setProviderKeys((prev) => {
+      const next = { ...prev };
+      if (value) next[providerKey] = value;
+      else delete next[providerKey];
+      return next;
+    });
+  };
+
+  const onLiveModels = (providerKey, models) => {
+    setLiveModels((prev) => ({ ...prev, [providerKey]: models }));
+  };
+
+  const setCustomProvider = (v) =>
+    setSettings((s) => ({ ...s, customProvider: v }));
+
+  // --------------------------------------------------------------- derived
+  const selectedTarget = resolveTarget(settings.singleModel);
+  const selectedHasKey = selectedTarget ? !!selectedTarget.apiKey : false;
+  const connectedCount = (config?.providers || []).filter(
+    (p) => providerKeys[p.key]
+  ).length;
+
+  const disabledReason = !config
+    ? "Loading model registry…"
+    : config.providers.length === 0
+    ? "No providers configured"
+    : config.models.length === 0
+    ? "No models available"
+    : mode === "single" && !settings.singleModel
+    ? "Select a model"
+    : mode === "single" && !selectedHasKey
+    ? `Add a ${selectedTarget?.provider.label || ""} API key in Settings`
     : null;
 
   const placeholder =
@@ -618,7 +844,10 @@ export default function Page() {
         setMode={setMode}
         theme={settings.theme}
         toggleTheme={() =>
-          setSettings((s) => ({ ...s, theme: s.theme === "dark" ? "light" : "dark" }))
+          setSettings((s) => ({
+            ...s,
+            theme: s.theme === "dark" ? "light" : "dark",
+          }))
         }
         onOpenSettings={() => setDrawerOpen(true)}
         onExport={exportChat}
@@ -627,11 +856,21 @@ export default function Page() {
         }}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         hasMessages={messages.length > 0}
-        keyReady={!!apiKey}
+        keyReady={mode === "team" ? connectedCount > 0 : selectedHasKey}
+        keyLabel={
+          mode === "team"
+            ? `${connectedCount}/${(config?.providers || []).length} providers`
+            : selectedHasKey
+            ? `${selectedTarget?.provider.label} ready`
+            : "no key"
+        }
       />
 
       <div className="relative flex min-h-0 flex-1">
-        <main ref={scrollRef} className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <main
+          ref={scrollRef}
+          className="flex min-w-0 flex-1 flex-col overflow-y-auto"
+        >
           <div className="mx-auto w-full max-w-4xl flex-1 px-3 py-4">
             {messages.length === 0 ? (
               <div className="mx-auto max-w-2xl py-10">
@@ -649,12 +888,13 @@ export default function Page() {
                     ? "One model, full control. Stream answers, download any response as Markdown, and grab individual code files straight from the message."
                     : "A pipeline of specialised agents — planner, coder, reviewer — each with its own model and system prompt, handing off work until a final synthesis."}
                 </p>
+
                 <div className="mt-6 grid gap-3 sm:grid-cols-3">
                   {[
                     {
                       icon: Bot,
-                      title: "Model switching",
-                      body: "Every picker is built from models.json at runtime — swap the file and the UI follows.",
+                      title: "Mix providers",
+                      body: "Token Harbor, Groq, OpenRouter, Gemini and any custom OpenAI-compatible endpoint — each with its own key.",
                     },
                     {
                       icon: Users,
@@ -676,14 +916,24 @@ export default function Page() {
                     </div>
                   ))}
                 </div>
-                {!apiKey && (
+
+                <div className="mt-6 flex flex-wrap items-center gap-2">
                   <button
-                    className="btn btn-primary mt-6"
+                    className="btn btn-primary"
                     onClick={() => setDrawerOpen(true)}
                   >
-                    <Wrench size={14} /> Add your API key to start
+                    <Wrench size={14} />
+                    {connectedCount > 0
+                      ? "Manage providers"
+                      : "Connect a provider to start"}
                   </button>
-                )}
+                  {connectedCount > 0 && (
+                    <span className="chip" style={{ color: "var(--ok)" }}>
+                      {connectedCount} provider{connectedCount === 1 ? "" : "s"}{" "}
+                      connected · {config?.models.length || 0} models
+                    </span>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-5">
@@ -720,17 +970,21 @@ export default function Page() {
         {/* Desktop sidebar */}
         <aside
           className="hidden w-[350px] shrink-0 overflow-y-auto xl:block"
-          style={{ borderLeft: "1px solid var(--line)", background: "var(--surface)" }}
+          style={{
+            borderLeft: "1px solid var(--line)",
+            background: "var(--surface)",
+          }}
         >
           <SidePanel
             mode={mode}
-            modelConfig={modelConfig}
+            config={config}
             settings={settings}
             setSettings={setSettings}
             singleModel={settings.singleModel}
             setSingleModel={(v) => setSettings((s) => ({ ...s, singleModel: v }))}
             team={team}
             setTeam={setTeam}
+            providerKeys={providerKeys}
           />
         </aside>
 
@@ -750,22 +1004,31 @@ export default function Page() {
             >
               <div
                 className="sticky top-0 flex items-center justify-between px-3 py-2"
-                style={{ background: "var(--panel)", borderBottom: "1px solid var(--line)" }}
+                style={{
+                  background: "var(--panel)",
+                  borderBottom: "1px solid var(--line)",
+                }}
               >
                 <span className="text-sm font-semibold">Workspace</span>
-                <button className="btn btn-xs btn-ghost" onClick={() => setSidebarOpen(false)}>
+                <button
+                  className="btn btn-xs btn-ghost"
+                  onClick={() => setSidebarOpen(false)}
+                >
                   Close
                 </button>
               </div>
               <SidePanel
                 mode={mode}
-                modelConfig={modelConfig}
+                config={config}
                 settings={settings}
                 setSettings={setSettings}
                 singleModel={settings.singleModel}
-                setSingleModel={(v) => setSettings((s) => ({ ...s, singleModel: v }))}
+                setSingleModel={(v) =>
+                  setSettings((s) => ({ ...s, singleModel: v }))
+                }
                 team={team}
                 setTeam={setTeam}
+                providerKeys={providerKeys}
               />
             </aside>
           </>
@@ -777,14 +1040,22 @@ export default function Page() {
         onClose={() => setDrawerOpen(false)}
         settings={settings}
         setSettings={setSettings}
-        apiKey={apiKey}
-        setApiKey={setApiKey}
-        modelConfig={modelConfig}
+        config={config}
+        providerKeys={providerKeys}
+        onProviderKeyChange={onProviderKeyChange}
+        customProvider={{
+          ...DEFAULT_CUSTOM_PROVIDER,
+          ...(settings.customProvider || {}),
+        }}
+        onCustomProviderChange={setCustomProvider}
+        liveModels={liveModels}
+        onLiveModels={onLiveModels}
         onReloadModels={(url) => loadModels(url)}
         onModelsFile={onModelsFile}
         modelsError={modelsError}
         loadingModels={loadingModels}
         onClearHistory={clearHistory}
+        onForgetAllKeys={() => setProviderKeys({})}
       />
     </div>
   );

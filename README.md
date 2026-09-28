@@ -1,7 +1,8 @@
 # Token Harbor · AI Team Studio
 
 A modern, developer-centric AI chat workspace with **single-agent** and **multi-agent
-team** workflows, built on any OpenAI-compatible endpoint.
+team** workflows, running on **any OpenAI-compatible provider** — Token Harbor, Groq,
+OpenRouter, Google Gemini, or your own endpoint.
 
 Built with Next.js 14 (App Router), Tailwind CSS, Lucide Icons and highlight.js.
 
@@ -15,7 +16,7 @@ Built with Next.js 14 (App Router), Tailwind CSS, Lucide Icons and highlight.js.
 - [Quick start (5 minutes)](#quick-start-5-minutes)
 - [Full user guide](#full-user-guide)
   - [1. The interface at a glance](#1-the-interface-at-a-glance)
-  - [2. Setting up your API key](#2-setting-up-your-api-key)
+  - [2. Connecting providers](#2-connecting-providers)
   - [3. Testing the connection](#3-testing-the-connection)
   - [4. Single Chat mode](#4-single-chat-mode)
   - [5. AI Team mode](#5-ai-team-mode)
@@ -23,6 +24,7 @@ Built with Next.js 14 (App Router), Tailwind CSS, Lucide Icons and highlight.js.
   - [7. Downloading and exporting](#7-downloading-and-exporting)
   - [8. Long input, paste and file upload](#8-long-input-paste-and-file-upload)
   - [9. Settings reference](#9-settings-reference)
+- [Supported providers](#supported-providers)
 - [Configuration reference (`models.json`)](#configuration-reference-modelsjson)
 - [Customisation recipes](#customisation-recipes)
 - [Architecture](#architecture)
@@ -38,18 +40,22 @@ Built with Next.js 14 (App Router), Tailwind CSS, Lucide Icons and highlight.js.
 ## What this app does
 
 Token Harbor AI Team Studio is a self-hosted chat interface that talks to **any
-OpenAI-compatible API**. It adds three things a plain chat window does not have:
+OpenAI-compatible API**. It adds four things a plain chat window does not have:
 
-1. **A connection tester** that proves your key and endpoint work before you waste
-   time debugging a prompt.
-2. **An AI Team mode** where several models work a task in sequence — a planner, a
+1. **Multiple providers side by side.** Keep a Groq key, an OpenRouter key and a
+   Gemini key at the same time. Every connected provider's models appear together in
+   one picker, grouped by provider.
+2. **A connection tester** that proves a key and endpoint work before you waste time
+   debugging a prompt.
+3. **An AI Team mode** where several models work a task in sequence — a planner, a
    coder, a reviewer — each with its own model, temperature and system prompt, ending
-   in one merged deliverable.
-3. **Real file output.** Every response can be exported as Markdown, and every code
+   in one merged deliverable. **Agents can use different providers**, so a Groq model
+   can plan while a Gemini model reviews.
+4. **Real file output.** Every response can be exported as Markdown, and every code
    block can be copied or saved as an actual file with the right extension.
 
-Everything runs locally or on your own server. Your API key never leaves your browser
-except to reach the endpoint you configured.
+Everything runs locally or on your own server. Your API keys never leave your browser
+except to reach the provider you configured.
 
 ---
 
@@ -59,7 +65,8 @@ except to reach the endpoint you configured.
 
 - **Node.js 18.17 or newer** (Node 22 recommended). Check with `node -v`.
 - npm (ships with Node) or pnpm/yarn if you prefer.
-- An API key from an OpenAI-compatible provider.
+- An API key from at least one supported provider. Groq and Google AI Studio both
+  have free tiers; OpenRouter has free models.
 
 ### 1. Install
 
@@ -83,13 +90,16 @@ You should see:
 ✓ Ready
 ```
 
-### 3. Open and connect
+### 3. Connect a provider
 
 1. Go to **http://localhost:3000**.
 2. Click the **gear icon** (top right) to open Settings.
-3. Paste your API key into the **Token Harbor API key** field.
-4. Click **Test**.
-5. You want a green badge reading **"Connected successfully! Status: 200 OK"**.
+3. Under **API providers**, click the **›** arrow next to a provider to expand it.
+4. Paste that provider's API key.
+5. Click **Test** — you want a green **"Connected successfully! Status: 200 OK"**.
+
+The provider's dot turns green, the header chip changes from `no key` to
+`<Provider> ready`, and its models become available in every model picker.
 
 ### 4. Chat
 
@@ -118,7 +128,7 @@ The screen has four regions:
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  HEADER                                                      │
-│  logo · [Single Chat | AI Team] · key status · actions       │
+│  logo · [Single Chat | AI Team] · provider status · actions  │
 ├────────────────────────────────────────┬─────────────────────┤
 │                                        │                     │
 │   CONVERSATION                         │   WORKSPACE PANEL   │
@@ -126,7 +136,7 @@ The screen has four regions:
 │   newest at the bottom                 │   system prompt     │
 │                                        │   team builder      │
 │                                        │   output options    │
-│                                        │   provider info     │
+│                                        │   provider summary  │
 │                                        │                     │
 ├────────────────────────────────────────┤                     │
 │  COMPOSER  (attach · type · send)      │                     │
@@ -139,7 +149,7 @@ The screen has four regions:
 |---|---|
 | **TH** logo + title | App identity |
 | **Single Chat / AI Team** | Switches between the two modes |
-| **key ready / no key** badge | Green dot = a key is stored; amber = none yet |
+| Provider status chip | In Single Chat: `<Provider> ready` or `no key` for the selected model. In AI Team: `N/M providers` connected |
 | **Export chat** | Downloads the whole conversation as a `.md` file (disabled when empty) |
 | **Trash icon** | Clears the conversation |
 | **Moon / Sun icon** | Toggles dark and light theme |
@@ -153,53 +163,106 @@ The screen has four regions:
 
 ---
 
-### 2. Setting up your API key
+### 2. Connecting providers
 
-Open **Settings** (gear icon) → **API credentials**.
+Open **Settings** (gear icon) → **API providers**.
 
-1. **Token Harbor API key** — paste your key. It is masked by default; click the
-   **eye icon** to reveal it. This is stored in your browser's `localStorage`, not on
-   any server.
-2. **Chat completions endpoint** — already filled in with
-   `https://tokenharbor.ai/v1/chat/completions`. Change it if you use a different
-   provider.
+Each provider is a collapsible card:
 
-**Where the key lives:** `localStorage` key `th-studio:apiKey`. It survives page
-reloads and browser restarts, but is scoped to the origin (`localhost:3000`), so a
-different port or domain will need the key entered again.
+```
+▾  ● Token Harbor        3 models                  Get key ↗
+     API KEY
+     [ •••••••••••••••••••••••••••••• ]  [eye]  [trash]
+     [⚡ Test]  [⟳ Refresh models]   https://tokenharbor.ai/v1/chat/completions
+     ✓ Connected successfully! Status: 200 OK
+       endpoint: https://tokenharbor.ai/v1/chat/completions
+       status:   200 OK
+       latency:  1418 ms
+       reply:    "OK"
+```
 
-**To remove it:** Settings → **Session** → **Forget API key**.
+**The dot** on the left of each card is grey when no key is saved and green once one
+is. The header shows a running total, e.g. `Providers 2/5 connected`.
 
-> **Formatting tip:** the endpoint field accepts either a full path
-> (`https://host/v1/chat/completions`) or just a base URL (`https://host/v1`). If you
-> give it a base URL, `/chat/completions` is appended for you. A bare host like
-> `api.example.com` gets `https://` prepended and the path added.
+**Each provider keeps its own key.** A Groq key and an OpenRouter key live side by
+side and are never mixed up — when you pick a Groq model, the Groq key and Groq
+endpoint are used.
+
+**Where keys live:** `localStorage` under `th-studio:providerKeys`, as a map of
+provider → key. They survive reloads and browser restarts, but are scoped to the
+origin (`localhost:3000`), so a different port or domain needs them entered again.
+
+**To remove one key:** the **trash** icon inside that provider's card.
+**To remove all:** Settings → Session → **Forget all keys**.
+
+#### Refreshing the model list
+
+Providers add and retire models constantly — Groq especially. The bundled
+`models.json` is a **curated seed**, so each card has a **Refresh models** button:
+
+1. Save a key.
+2. Click **Refresh models**.
+3. The app calls that provider's `/models` endpoint server-side and merges the result
+   with the curated list.
+
+The note under the button tells you what happened, e.g.
+`Loaded 17 chat models (3 non-chat hidden)`. Non-chat entries (Whisper, embeddings,
+image generators, moderation and guard models) are filtered out automatically.
+
+Curated entries you added by hand are **never** dropped by a refresh — only added to.
+
+#### The custom provider
+
+The last card is **Custom provider**, for anything not in the built-in list:
+LM Studio, Ollama, vLLM, llama.cpp, a company gateway, or your own proxy. Expand it
+and fill in:
+
+| Field | Example |
+|---|---|
+| **Display name** | `My Local LLM` |
+| **Base URL** | `http://localhost:1234/v1` |
+| **Chat completions path** | `/chat/completions` |
+| **Model IDs** (one per line) | `llama-3.1-8b-instruct`<br>`qwen2.5-coder-7b` |
+| **API key** | optional for local servers |
+
+The display name becomes the group heading in the model picker, so you can rename it
+to anything meaningful.
+
+> **Local server gotcha:** the base URL must be reachable from the **machine running
+> this app**, not just your browser. If the app runs in Docker, `localhost` points at
+> the container, not your host — use `host.docker.internal` instead.
+
+#### Adding a provider that isn't listed
+
+Any OpenAI-compatible service works. Either use the **Custom provider** card, or add
+an entry to `public/models.json` (see
+[Configuration reference](#configuration-reference-modelsjson)).
 
 ---
 
 ### 3. Testing the connection
 
-Next to the key field is the **Test** button. Click it and one of these appears:
+Each provider card has its own **Test** button. Click it and one of these appears
+inside that card:
 
 **Success:**
 
 ```
 ✓ Connected successfully! Status: 200 OK
-  endpoint: https://tokenharbor.ai/v1/chat/completions
+  endpoint: https://api.groq.com/openai/v1/chat/completions
   status:   200 OK
-  latency:  2539 ms
-  model:    qwen3.8-flash:free
+  latency:  412 ms
   reply:    "OK"
 ```
 
 **Failure:**
 
 ```
-⚠ Connection failed: invalid or unauthorized API key.
-  endpoint: https://tokenharbor.ai/v1/chat/completions
+⚠ Groq: connection failed — invalid or unauthorized API key.
+  endpoint: https://api.groq.com/openai/v1/chat/completions
   status:   401 Unauthorized
-  latency:  640 ms
-  detail:   Invalid or revoked API key. Rotate your key at ...
+  latency:  238 ms
+  detail:   Invalid API Key
 ```
 
 The test sends the smallest possible request — a single message, `max_tokens: 5` —
@@ -210,11 +273,12 @@ so it costs almost nothing and returns in seconds. What it proves:
 | `200 OK` + a reply string | Key, endpoint, model name and network path all work |
 | `401` / `403` | Key is wrong, expired or revoked |
 | `404` | Endpoint path is wrong (check for `/v1` in the URL) |
+| `400` on Gemini | Key rejected — Google returns 400 for a bad key, not 401 |
 | `429` | Rate limited — wait and retry |
 | Timeout or "network unreachable" | The server cannot reach the provider (firewall, DNS, offline) |
 
-> Because the request is proxied by the app's own server, a successful test also
-> proves the **server** has network access — not just your browser.
+> Because requests are proxied by the app's own server, a successful test also proves
+> the **server** has network access — not just your browser.
 
 ---
 
@@ -226,7 +290,7 @@ This is the default mode: one model, one system prompt, a normal back-and-forth.
 
 | Field | Purpose |
 |---|---|
-| **Model** | Picked from `models.json`. Model cards below the picker show the ID, whether it is a free tier, supported modalities, and what it is suited for |
+| **Model** | Grouped by provider. Each group shows `· no key` until connected. Model chips below show the provider, ID, free tier, context size, modalities and suited-for tags |
 | **System prompt** | Instructions that apply to every turn in this conversation |
 | **Temperature** | Randomness slider, `0.00`–`1.50`. Low = deterministic, high = creative |
 | **Max tokens** | Upper bound on the reply length |
@@ -246,13 +310,17 @@ This is the default mode: one model, one system prompt, a normal back-and-forth.
 - Press **Shift+Enter** for a newline inside the message.
 - The char counter under the box shows your current input length.
 
+If the selected model's provider has no key, a warning appears under the picker and
+the Send button stays disabled with an explanatory tooltip.
+
 **While it is generating:**
 
 - Text streams in token by token.
 - The Send button becomes **Stop** — click it to abort mid-generation.
-- If the model is a "thinking" model (Qwen / DeepSeek style), a **Reasoning** panel
-  appears above the answer showing the chain of thought. It is collapsed by default;
-  click it to read, and note the char count so you know something is happening.
+- If the model is a "thinking" model (Qwen / DeepSeek / Gemini thinking variants), a
+  **Reasoning** panel appears above the answer showing the chain of thought. It is
+  collapsed by default; click it to read, and note the char count so you know
+  something is happening.
 - The message header shows a `streaming…` chip while in flight.
 
 **Per-message actions** (top-right of every reply):
@@ -261,7 +329,7 @@ This is the default mode: one model, one system prompt, a normal back-and-forth.
 |---|---|
 | **Copy** | Copies the raw Markdown to your clipboard; flips to "Copied!" |
 | **.md** | Downloads that single message as a Markdown file |
-| **Refresh** | Regenerates the reply using the same prompt and history |
+| **Refresh** | Regenerates the reply using the same prompt, history **and provider** |
 | **Trash** | Deletes that message |
 
 Context is maintained: each request sends the whole conversation plus your system
@@ -282,17 +350,17 @@ agent to a pipeline editor.
         └───────────────────────┬─────────────────────────────┘
                                 ▼
         ┌─────────────────────────────────────────────────────┐
-        │  Step 1 — Architect (model A, temp 0.4)             │
+        │  Step 1 — Architect   Groq / GPT-OSS 120B   temp .4 │
         │  Plans: requirements, file layout, risks            │
         └───────────────────────┬─────────────────────────────┘
                                 ▼  task + step 1 output
         ┌─────────────────────────────────────────────────────┐
-        │  Step 2 — Developer (model B, temp 0.5)             │
+        │  Step 2 — Developer   Gemini / 3.1 Pro      temp .5 │
         │  Implements the plan as complete code               │
         └───────────────────────┬─────────────────────────────┘
                                 ▼  task + steps 1–2 output
         ┌─────────────────────────────────────────────────────┐
-        │  Step 3 — Reviewer (model C, temp 0.3)              │
+        │  Step 3 — Reviewer    OpenRouter / Claude   temp .3 │
         │  Finds bugs, verifies, corrects                     │
         └───────────────────────┬─────────────────────────────┘
                                 ▼  full transcript
@@ -306,6 +374,11 @@ Each agent **receives the original task plus every earlier agent's full output**
 the work refines rather than restarts. The final synthesis pass drops the internal
 debate and produces a single clean answer.
 
+**Each agent can use a different provider.** The model picker in each agent card is
+grouped by provider, so you can mix Groq, Gemini, OpenRouter and local models freely
+in one pipeline. Provider names are carried into the transcript so downstream agents
+know who produced what.
+
 #### Running a team task
 
 1. Switch to **AI Team**.
@@ -315,17 +388,20 @@ debate and produces a single clean answer.
    > tests. Target Python 3.12."*
 4. Press **Enter**.
 
+If any agent's provider is missing a key, a warning names the providers and opens
+Settings instead of silently failing mid-pipeline.
+
 #### Reading the results
 
 Steps appear as **collapsible accordions**, one per agent:
 
 ```
-▸ 1. Architect   [Planner]  qwen3.8-flash:free        4.2s   1,240 chars
-▾ 2. Developer   [Coder]    deepseek-v4.1-flash:free  11.8s  3,910 chars
+▸ 1. Architect   [Planner]  groq / openai/gpt-oss-120b     4.2s   1,240 chars
+▾ 2. Developer   [Coder]    gemini / gemini-3.1-pro       11.8s   3,910 chars
       ┌ Reasoning (optional, collapsed)
       └ The actual output, with syntax-highlighted code blocks
         [Copy] [Download]                    [Download step]
-▸ 3. Reviewer    [QA]       qwen3.8-flash:free        6.5s   2,050 chars
+▸ 3. Reviewer    [QA]       openrouter / claude-opus-5.5   6.5s   2,050 chars
 ```
 
 - The **first step auto-expands**; the rest are collapsed.
@@ -351,7 +427,7 @@ A status strip above the steps reads `N/M steps complete` and shows a
 | Role | Short label shown as a chip, e.g. `Planner` |
 | Checkbox | Include/exclude this agent without deleting it |
 | Trash | Remove the agent |
-| Model | Any model from `models.json` — **mix models freely** |
+| Model | Any model from **any connected provider** — mix freely |
 | Preset | Architect / Developer / Reviewer / Custom — loads a tuned prompt |
 | Temp slider | Per-agent temperature |
 | System prompt | Full instruction text for this agent only |
@@ -368,17 +444,17 @@ independently.
 
 #### Choosing models per role
 
-A good default split, using the bundled registry:
+A good default split:
 
-| Role | Model | Why |
+| Role | Suggested provider / model | Why |
 |---|---|---|
-| Architect | `qwen3.8-flash:free` | Strong reasoning, fast, handles structure |
-| Developer | `deepseek-v4.1-flash:free` | Strong at code generation |
-| Reviewer | `qwen3.8-flash:free` | Good analytical pass |
-| Synthesis | `qwen3.8-flash:free` | Needs to blend and summarise |
+| Architect | Groq · `openai/gpt-oss-120b` | Fast, strong reasoning, generous free tier |
+| Developer | Gemini · `gemini-3.1-pro` | Strong code generation, large context |
+| Reviewer | OpenRouter · any strong model | Independent critique from a different vendor |
+| Synthesis | Token Harbor · `qwen3.8-flash:free` | Blends and summarises well |
 
-Using a **different model for the reviewer than the coder** is genuinely useful — it
-gives you an independent critique rather than the same model agreeing with itself.
+Using a **different provider for the reviewer than the coder** is genuinely useful —
+it gives you an independent critique rather than the same model agreeing with itself.
 
 ---
 
@@ -507,14 +583,18 @@ under the user message, so long pastes do not dominate the scrollback.
 
 Open with the **gear icon**.
 
-#### API credentials
-| Field | Notes |
+#### API providers
+| Control | Purpose |
 |---|---|
-| Token Harbor API key | Stored in `localStorage`; masked with an eye toggle |
-| Chat completions endpoint | Full URL or base URL; path is auto-completed |
-| **Test** | Runs the 5-token probe and shows the diagnostic badge |
+| Provider card **›** | Expand to reveal that provider's key field and actions |
+| **API key** | Stored in `localStorage`; masked with an eye toggle and a clear button |
+| **Test** | Runs the 5-token probe and shows the diagnostic badge in-card |
+| **Refresh models** | Fetches the provider's live `/models` list server-side |
+| **Get key ↗** | Opens the provider's key page in a new tab |
+| **Display name / Base URL / Chat path / Model IDs** | Custom provider only |
+| Header counter | `N/M connected` across all providers |
 
-#### Model registry
+#### Model registry source
 | Control | Purpose |
 |---|---|
 | **Upload models.json** | Replace the registry from a local file (saved to `localStorage`) |
@@ -522,8 +602,7 @@ Open with the **gear icon**.
 | **Reset source** | Go back to the bundled `/models.json` |
 | URL field + **Load URL** | Fetch a registry from a remote URL, via the server proxy |
 
-Loaded models are listed as chips with their ID, and `(disabled)` is shown for
-entries with `"enabled": false`.
+The loaded providers are listed below with their model counts.
 
 #### Generation
 | Control | Notes |
@@ -537,9 +616,60 @@ entries with `"enabled": false`.
 | Button | Effect |
 |---|---|
 | **Clear conversation** | Empties the message list |
-| **Forget API key** | Removes the key from `localStorage` |
+| **Forget all keys** | Removes every provider key from `localStorage` |
 
-Settings and the team definition persist automatically across reloads.
+Settings, keys, the team definition and cached model lists all persist across reloads.
+
+---
+
+## Supported providers
+
+Built into `public/models.json` out of the box:
+
+| Provider | Base URL | Free tier | Key from |
+|---|---|---|---|
+| **Token Harbor** | `https://tokenharbor.ai/v1` | Yes (`:free` models) | [dashboard](https://tokenharbor.ai/dashboard) |
+| **Groq** | `https://api.groq.com/openai/v1` | Yes | [console.groq.com/keys](https://console.groq.com/keys) |
+| **OpenRouter** | `https://openrouter.ai/api/v1` | Yes (17+ `:free` models) | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| **Custom** | you define it | — | — |
+
+All five use **Bearer token** auth against an OpenAI-compatible
+`/chat/completions` endpoint. Gemini is reached through Google's official
+OpenAI-compatibility layer, so the same code path works.
+
+### Seeded models
+
+| Provider | Seeded models |
+|---|---|
+| Token Harbor | `qwen3.8-flash:free`, `deepseek-v4.1-flash:free`, `mimo-v2.6-flash:free` |
+| Groq | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `qwen/qwen3.8-27b`, `minimaxai/minimax-m2.7` |
+| OpenRouter | `qwen/qwen3.8-27b:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `google/gemma-4-31b-it:free`, `deepseek/deepseek-v4.1-flash`, `openai/gpt-6-luna`, `anthropic/claude-opus-5.5`, `x-ai/grok-4.7` |
+| Google Gemini | `gemini-3.8-flash`, `gemini-3.1-pro`, `gemini-3.1-flash-lite`, `gemini-3-flash`, `gemini-2.5-pro` |
+
+These are a **starting point, not a fixed list** — model IDs change frequently, which
+is exactly why each card has **Refresh models** to pull the live catalogue.
+
+### Adding another provider
+
+Anything exposing an OpenAI-compatible `/chat/completions` works. Add a block to
+`public/models.json`:
+
+```json
+"mistral": {
+  "label": "Mistral",
+  "base_url": "https://api.mistral.ai/v1",
+  "chat_endpoint": "/chat/completions",
+  "models_endpoint": "/models",
+  "key_url": "https://console.mistral.ai/api-keys",
+  "enabled": true,
+  "models": {
+    "large": { "id": "mistral-large-latest", "label": "Mistral Large", "default": true }
+  }
+}
+```
+
+Then add `"mistral"` to `routing.text` to control its position in the pickers.
 
 ---
 
@@ -550,99 +680,101 @@ it and just refresh the page — **no rebuild required**.
 
 ```json
 {
-  "provider": {
-    "name": "tokenharbor",
-    "base_url": "https://tokenharbor.ai/v1",
-    "chat_endpoint": "/chat/completions",
-    "api_style": "openai-compatible"
-  },
+  "providers": {
+    "tokenharbor": {
+      "label": "Token Harbor",
+      "base_url": "https://tokenharbor.ai/v1",
+      "chat_endpoint": "/chat/completions",
+      "models_endpoint": "/models",
+      "api_style": "openai-compatible",
+      "key_url": "https://tokenharbor.ai/dashboard",
+      "enabled": true,
+      "models": {
+        "qwen": {
+          "id": "qwen3.8-flash:free",
+          "label": "Qwen 3.8 Flash",
+          "enabled": true,
+          "default": true,
+          "modalities": ["text", "image", "video"],
+          "use_for": ["general_text", "image_understanding"]
+        }
+      }
+    },
 
-  "models": {
-    "qwen": {
-      "id": "qwen3.8-flash:free",
-      "enabled": true,
-      "modalities": ["text", "image", "video"],
-      "input_types": ["text", "image", "video"],
-      "use_for": ["general_text", "image_understanding", "video_understanding"]
+    "openrouter": {
+      "label": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "headers": {
+        "HTTP-Referer": "https://github.com/Jeeva-zone/chat_bot",
+        "X-Title": "Token Harbor AI Team Studio"
+      },
+      "models": { }
     },
-    "deepseek": {
-      "id": "deepseek-v4.1-flash:free",
-      "enabled": true,
-      "modalities": ["text", "image"],
-      "use_for": ["general_text", "image_understanding"]
-    },
-    "mimo": {
-      "id": "mimo-v2.6-flash:free",
-      "enabled": true,
-      "modalities": ["text"],
-      "use_for": ["general_text"]
+
+    "custom": {
+      "label": "Custom provider",
+      "base_url": "",
+      "custom": true,
+      "models": { }
     }
   },
 
-  "routing": {
-    "text":  ["qwen", "deepseek", "mimo"],
-    "image": ["qwen", "deepseek"],
-    "video": ["qwen"]
-  },
-
-  "defaults": {
-    "text":  "qwen",
-    "image": "qwen",
-    "video": "qwen"
-  }
+  "routing": { "text": ["tokenharbor", "groq", "openrouter", "gemini", "custom"] },
+  "defaults": { "provider": "tokenharbor", "text": "tokenharbor" }
 }
 ```
 
-### Field reference
+### Provider fields
 
 | Field | Required | Meaning |
 |---|---|---|
-| `provider.base_url` | no | Base of the API. Default `https://tokenharbor.ai/v1` |
-| `provider.chat_endpoint` | no | Path appended to `base_url`. Default `/chat/completions` |
-| `models` | **yes** | The model registry |
-| `models.<alias>.id` | **yes** | The exact model string sent to the API |
-| `models.<alias>.enabled` | no | `false` hides it from all pickers (default `true`) |
-| `models.<alias>.label` | no | Display name. Auto-generated from the alias if omitted |
-| `models.<alias>.modalities` | no | Informational tags shown on the model card |
-| `models.<alias>.input_types` | no | Falls back to `modalities` |
-| `models.<alias>.use_for` | no | Informational "suited for" tags |
-| `models.<alias>.context` | no | Context window, informational |
-| `routing.text` | no | **Also sets picker display order** |
-| `defaults.text` | no | Which model is selected initially |
+| `label` | no | Display name in cards and picker groups. Auto-generated from the key if omitted |
+| `base_url` | yes | API base. `/chat/completions` is appended automatically |
+| `chat_endpoint` | no | Override the chat path. Default `/chat/completions` |
+| `models_endpoint` | no | Path used by **Refresh models**. Default `/models` |
+| `api_style` | no | Informational. Default `openai-compatible` |
+| `key_url` | no | Renders the **Get key ↗** link |
+| `docs_url` | no | Renders a **Provider docs** link |
+| `note` | no | One-line description shown on the collapsed card |
+| `headers` | no | Extra request headers, e.g. OpenRouter attribution |
+| `custom` | no | `true` marks the user-editable provider |
+| `enabled` | no | `false` hides the whole provider (default `true`) |
+| `models` | yes | The model registry for this provider |
 
-Entries with `"enabled": false` remain in the file but are hidden everywhere.
+### Model fields
 
-### Adding a model
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | **yes** | The exact model string sent to the API |
+| `label` | no | Display name. Auto-generated from the key if omitted |
+| `enabled` | no | `false` hides it from pickers (default `true`) |
+| `default` | no | Pre-selects this model for its provider |
+| `modalities` | no | Tags shown on the model card, e.g. `["text","image"]` |
+| `use_for` | no | Informational "suited for" tags |
+| `context` | no | Context window; shown as `128K ctx` on the card |
+
+### Routing and defaults
+
+| Key | Effect |
+|---|---|
+| `routing.text` | **Sets the display order** of providers in the picker and cards |
+| `defaults.provider` | Which provider's default model is selected on first load |
+
+### Legacy format still works
+
+Older single-provider files are detected and upgraded automatically:
 
 ```json
-"llama": {
-  "id": "llama-3.3-70b:free",
-  "enabled": true,
-  "modalities": ["text"],
-  "use_for": ["general_text", "long_context"]
+{
+  "provider": { "name": "tokenharbor", "base_url": "https://tokenharbor.ai/v1" },
+  "models": { "qwen": { "id": "qwen3.8-flash:free", "default": true } },
+  "routing": { "text": ["qwen"] },
+  "defaults": { "text": "qwen" }
 }
 ```
 
-Add `"llama"` to `routing.text` to control where it appears in the picker order.
-
-### Pointing at a different provider
-
-```json
-"provider": {
-  "name": "my-provider",
-  "base_url": "https://api.example.com/v1",
-  "chat_endpoint": "/chat/completions"
-}
-```
-
-Any OpenAI-compatible API works. For a local Ollama or LM Studio instance, use the
-loopback URL plus the chat completions path — and note it must be reachable from the
-**server** running this app, not just your browser.
-
-### Escaping the bundled file
-
-If you would rather not edit the repo, use **Settings → Model registry → Upload
-models.json** or **Load URL**. Both override the bundled file.
+This is treated as one provider named after `provider.name`, with `routing.text`
+interpreted as model order. No migration needed.
 
 ---
 
@@ -651,7 +783,7 @@ models.json** or **Load URL**. Both override the bundled file.
 ### A coding-focused single agent
 
 ```
-Model:       deepseek-v4.1-flash:free
+Model:       groq / openai/gpt-oss-120b
 Temperature: 0.35
 Max tokens:  8192
 System prompt:
@@ -660,6 +792,16 @@ System prompt:
   and a filename, like ```python:app/main.py. State assumptions in one line before
   the code. Point out security or performance risks you notice.
 ```
+
+### A cross-provider coding team
+
+| # | Name | Role | Provider / model | Temp |
+|---|---|---|---|---|
+| 1 | Architect | Planner | Groq · `openai/gpt-oss-120b` | 0.4 |
+| 2 | Developer | Coder | Gemini · `gemini-3.1-pro` | 0.5 |
+| 3 | Reviewer | QA | OpenRouter · `anthropic/claude-opus-5.5` | 0.3 |
+
+Three vendors, three independent perspectives on the same problem.
 
 ### A document-review team
 
@@ -671,19 +813,25 @@ System prompt:
 
 Turn the final synthesis **off** if you want the three outputs kept separate.
 
-### A research-and-summarise team
+### A fully free pipeline
 
-1. **Searcher** (temp 0.6) — enumerate angles, subtopics and open questions.
-2. **Analyst** (temp 0.3) — reason through each angle, note where evidence is thin.
-3. **Editor** (temp 0.5) — produce the final structured briefing.
+Use only `:free` models so a team run costs nothing:
+
+| Role | Model |
+|---|---|
+| Architect | Token Harbor · `qwen3.8-flash:free` |
+| Developer | Token Harbor · `deepseek-v4.1-flash:free` |
+| Reviewer | OpenRouter · `qwen/qwen3.8-27b:free` |
+| Synthesis | OpenRouter · `nvidia/nemotron-3-super-120b-a12b:free` |
 
 ### Reducing cost
 
-- Use `:free` tier models for the planner and reviewer; reserve a stronger model for
-  the coder.
+- Use `:free` tier models for the planner and reviewer; reserve a paid model for the
+  coder.
 - Lower **Max tokens** for agents that only plan.
 - Disable the **final synthesis** when the last agent's output is already what you want.
 - Remove agents you are not actually using — each one is a full API call.
+- A local model through the **Custom provider** is free and private.
 
 ---
 
@@ -693,10 +841,17 @@ Turn the final synthesis **off** if you want the three outputs kept separate.
 Browser                     Next.js server              Provider
 ───────                     ──────────────              ────────
 Settings drawer
-  └─ key in localStorage
+  └─ keys in localStorage
+     (one per provider)
+Model picker
+  └─ "groq::openai/gpt-oss-120b"
+       │
+       ├─ resolve provider → base URL + key + headers
+       │
 Composer
   └─ POST /api/chat ───────► app/api/chat/route.js
                                 └─ normalize endpoint
+                                └─ merge provider headers
                                 └─ POST + Bearer key ──► /chat/completions
                                 ◄──── SSE stream ──────
   ◄──── SSE passthrough ──────
@@ -709,18 +864,19 @@ page.jsx
 ```
 
 **Why the proxy?** Browsers cannot call most provider APIs directly due to CORS. The
-app's own server route makes the upstream request, so CORS never applies and the key
-is never sent to a third-party origin from the page. Streaming is passed through
+app's own server routes make the upstream request, so CORS never applies and keys are
+never sent to a third-party origin from the page. Streaming is passed through
 untouched, so token-by-token rendering is preserved.
 
 | Route | Method | Purpose |
 |---|---|---|
-| `/api/chat` | POST | Proxies chat completions; streams SSE back |
+| `/api/chat` | POST | Proxies chat completions; streams SSE back. Accepts `headers` for provider-specific extras |
 | `/api/test` | POST | Minimal 5-token probe, returns a diagnostic report |
 | `/api/models` | GET | Fetches a remote `models.json` server-side (avoids CORS) |
+| `/api/models` | POST | Lists a provider's **live** models, filtering out non-chat entries |
 
-Both `/api/chat` and `/api/test` accept a full URL or a base URL and normalise the
-path. Errors are returned as JSON with a `detail` field carrying the upstream body.
+`/api/chat` and `/api/test` accept a full URL or a base URL and normalise the path.
+Errors come back as JSON with a `detail` field carrying the upstream message.
 
 ---
 
@@ -734,11 +890,13 @@ app/
   api/
     chat/route.js         Streaming proxy to /chat/completions
     test/route.js         Minimal connection tester
-    models/route.js       Proxy for remotely hosted models.json
+    models/route.js       Remote models.json + live provider model lists
 components/
-  Header.jsx              Top bar, mode toggle, theme switch
+  Header.jsx              Top bar, mode toggle, provider status
   SidePanel.jsx           Workspace panel (model, prompt, output options)
-  SettingsDrawer.jsx      API key, endpoint, test, model registry, session
+  SettingsDrawer.jsx      Providers, registry source, generation, session
+  ProvidersPanel.jsx      Per-provider key cards, test, refresh, custom editor
+  ModelSelect.jsx         Provider-grouped model picker
   TeamBuilder.jsx         Agent pipeline editor
   Composer.jsx            Input, attachments, long-paste collapsing
   MessageItem.jsx         Message shell + per-message actions
@@ -747,28 +905,33 @@ components/
   CodeBlock.jsx           Highlighted code + copy/download
   ReasoningBlock.jsx      Collapsible chain-of-thought panel
 lib/
-  models.js               models.json normalisation
-  client.js               SSE stream reader
+  models.js               Provider/model normalisation, resolution, live merge
+  server.js               Server-side URL/header/model-list helpers
+  client.js               SSE stream reader + provider test/list calls
   markdown.js             Dependency-free Markdown → HTML (XSS-safe)
   download.js             Blob downloads + filename inference
   export.js               Markdown serialisation
-  storage.js              Namespaced localStorage helpers
-  defaults.js             Default settings and agent presets
+  storage.js              Namespaced localStorage + per-provider keys
+  defaults.js             Default settings, agent presets, custom provider shape
 public/
-  models.json             Model registry
+  models.json             Provider and model registry
 ```
 
 ### Where to change things
 
 | I want to… | Edit |
 |---|---|
-| Add or remove models | `public/models.json` |
+| Add or remove a provider | `public/models.json` → `providers` |
+| Add or remove models | `public/models.json` → that provider's `models` |
+| Change provider order in pickers | `public/models.json` → `routing.text` |
+| Change the default provider | `public/models.json` → `defaults.provider` |
 | Change the default system prompt | `lib/defaults.js` → `DEFAULT_SETTINGS.systemPrompt` |
 | Change the agent presets | `lib/defaults.js` → `AGENT_PRESETS` |
-| Change the default endpoint | `lib/defaults.js` → `DEFAULT_SETTINGS.endpoint` |
+| Change the custom provider defaults | `lib/defaults.js` → `DEFAULT_CUSTOM_PROVIDER` |
 | Change the long-paste threshold (2,000) | `components/Composer.jsx` → `LONG_PASTE_THRESHOLD` |
 | Change the attachment size cap (2 MB) | `components/Composer.jsx` → `MAX_FILE_BYTES` |
 | Add a language → extension mapping | `lib/download.js` → `EXT_BY_LANG` |
+| Change which models are filtered as non-chat | `lib/server.js` → `NON_CHAT` |
 | Change colours or theme | `app/globals.css` → `:root` and `.dark` token blocks |
 | Change the SSE parsing logic | `lib/client.js` → `streamChat` |
 
@@ -778,11 +941,13 @@ All app state is namespaced under `th-studio:` in `localStorage`:
 
 | Key | Contents |
 |---|---|
-| `th-studio:apiKey` | Your API key |
-| `th-studio:settings` | Temperature, max tokens, endpoint, output flags, theme |
+| `th-studio:providerKeys` | `{ providerKey: apiKey }` — one key per provider |
+| `th-studio:settings` | Temperature, max tokens, theme, output flags, custom provider |
 | `th-studio:team` | The full agent pipeline definition |
 | `th-studio:history` | Last 40 messages |
 | `th-studio:modelsJson` | A custom uploaded registry, if any |
+| `th-studio:liveModels` | Model lists cached from **Refresh models** |
+| `th-studio:apiKey` | Legacy single-key slot, auto-migrated on first load |
 
 Clearing site data resets the app to defaults.
 
@@ -790,8 +955,8 @@ Clearing site data resets the app to defaults.
 
 ## Security notes
 
-- **The API key is never committed to the repo.** `.gitignore` excludes `.env*`; the
-  key lives only in your browser's `localStorage` under `th-studio:`.
+- **API keys are never committed to the repo.** `.gitignore` excludes `.env*`; keys
+  live only in your browser's `localStorage` under `th-studio:providerKeys`.
 - **Never put a key in `public/models.json`.** That file is served to every visitor.
   An earlier revision of this repository had a live key in that file; it was removed
   before the first commit. If you ever see an `api_key` or `api_key_env` value in
@@ -799,28 +964,66 @@ Clearing site data resets the app to defaults.
 - **Model output is HTML-escaped before Markdown rendering**, so a model cannot inject
   scripts or markup into the page. Link URLs are scheme-checked; anything that is not
   `http`, `https`, `mailto`, or a relative path is neutralised.
+- **Provider headers are whitelisted by shape** — only string keys with non-null
+  values are forwarded, so a malformed `models.json` cannot inject arbitrary headers.
 - **PDF-style risks do not apply here** — there is no file execution. Uploaded files
   are read as text and embedded into the prompt.
-- **If you deploy this publicly**, anyone who reaches the URL can use their own key,
-  but your key is never baked into the build. Consider putting it behind
-  authentication if you plan to expose it.
-- **Treat prompts and files as data sent to your provider.** Do not paste secrets you
-  would not share with that API.
+- **If you deploy this publicly**, anyone who reaches the URL can use their own keys,
+  but yours are never baked into the build. Consider putting it behind authentication
+  if you plan to expose it.
+- **Treat prompts and files as data sent to your chosen provider.** Do not paste
+  secrets you would not share with that API.
 
 ---
 
 ## Troubleshooting
 
+### A provider shows `no key` in the picker
+
+Its key is missing or was cleared. Open Settings → API providers, expand that card and
+paste the key. The group heading drops the `· no key` suffix as soon as a key is saved.
+
 ### "Connection failed: invalid or unauthorized API key"
 
 - Re-paste the key — trailing whitespace is a common cause.
-- Check the key has not been revoked or rotated at your provider's dashboard.
-- Confirm the endpoint matches the provider the key belongs to.
+- Check the key has not been revoked or rotated at the provider's dashboard.
+- Confirm you are pasting it into the **matching provider's card**. A Groq key in the
+  OpenRouter card will always fail.
+
+### Google Gemini returns `400` instead of `401`
+
+That is Google's normal behaviour for a bad key. The tester surfaces the message
+(`Please pass a valid API key`). Get a fresh key from
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+
+### OpenRouter says "Missing Authentication header"
+
+Counter-intuitively, OpenRouter returns this for a **malformed** key, not a missing
+header — the app always sends `Authorization: Bearer …`. A key shaped like
+`sk-or-v1-<64 hex>` is expected. A short placeholder like `sk-or-fake` produces this
+exact message.
+
+### "Refresh models" fails
+
+- Confirm a key is saved for that provider.
+- The endpoint may differ — check `models_endpoint` in `models.json`.
+- Some providers rate-limit `/models`. Wait a moment and retry.
+- If it keeps failing, the curated seed list still works; you only lose the live
+  catalogue.
+
+### Custom provider: nothing happens when I send
+
+- The base URL must be reachable from the **app server**, not your browser. From the
+  app machine, `curl http://localhost:1234/v1/models` should respond.
+- If the app runs in Docker, use `host.docker.internal` instead of `localhost`.
+- Confirm you added at least one model ID — a provider with no models is hidden from
+  the picker.
+- The chat path must be exact (`/chat/completions` for most servers).
 
 ### "Connection failed" with a network error
 
 - The **server** cannot reach the provider. Test from that machine:
-  `curl -I https://tokenharbor.ai/v1`
+  `curl -I https://api.groq.com/openai/v1`
 - Corporate proxy, VPN or firewall blocking outbound HTTPS is the usual cause.
 - DNS failures show up here too.
 
@@ -830,8 +1033,8 @@ The endpoint path is wrong. OpenAI-compatible APIs almost always need the `/v1`
 segment:
 
 ```
-✓ https://tokenharbor.ai/v1/chat/completions
-✗ https://tokenharbor.ai/chat/completions
+✓ https://api.groq.com/openai/v1/chat/completions
+✗ https://api.groq.com/chat/completions
 ```
 
 ### Answers are empty but the Reasoning panel fills up
@@ -842,23 +1045,24 @@ reasoning models; 4096–8192 works better.
 
 ### "No models loaded" in the picker
 
-- Confirm `public/models.json` exists and is valid JSON.
+- Confirm `public/models.json` is valid JSON.
 - Open the browser console — a failed fetch logs there.
-- Settings → Model registry → **Reset source**, then **Reload**.
+- Settings → Model registry source → **Reset source**, then **Reload**.
 - If you uploaded a custom file and it is malformed, clear site data to reset.
 
 ### The Send button is disabled
 
 Check the tooltip. It means one of:
-- No API key set → open Settings.
+- The selected model's provider has no key → open Settings.
 - No models loaded → fix `models.json`.
+- No model selected yet.
 - The composer is empty and has no attachments.
 
 ### Nothing streams; the reply appears all at once
 
 - **Settings → Stream responses** may be off.
-- Some proxies buffer SSE and break streaming. Leave streaming on and check the
-  server logs, or turn streaming off for a consistent (slower) experience.
+- Some proxies buffer SSE and break streaming. Leave streaming on and check the server
+  logs, or turn streaming off for a consistent (slower) experience.
 
 ### A team step failed but later steps continued
 
@@ -885,15 +1089,25 @@ button again; if it persists, check the download-blocked icon in the address bar
 ## FAQ
 
 **Do I need a paid key?**
-No. The bundled registry uses `:free` tier models and the app is provider-agnostic.
+No. Groq, Google AI Studio and OpenRouter all have free tiers, and the seeded Token
+Harbor models are `:free`. A local model through the Custom provider costs nothing.
 
-**Can I use OpenAI, Anthropic-compatible gateways, Groq, Together, or a local LLM?**
-Yes — anything exposing an OpenAI-compatible `/chat/completions`. Set the endpoint in
-Settings or change `base_url` in `models.json`.
+**Can I use several providers at once?**
+Yes — that is the point. Each provider keeps its own key, and all connected providers'
+models appear in one grouped picker. In AI Team mode you can assign a different
+provider to every agent.
+
+**Which providers are supported?**
+Anything exposing an OpenAI-compatible `/chat/completions` with Bearer auth. Four are
+built in plus a fully editable custom provider.
+
+**How do I keep the model list current?**
+Click **Refresh models** on a provider card. It pulls the live catalogue from the
+provider and merges it with the curated seed, filtering out non-chat models.
 
 **Is my conversation stored on a server?**
 No. Messages live in `localStorage` — last 40 messages. Only the prompt text is sent
-upstream to the model provider you configured.
+upstream to the model provider you selected.
 
 **How many agents can a team have?**
 No hard limit, but each one is a sequential API call, so a 6-agent pipeline is
@@ -911,9 +1125,9 @@ library.
 `models.json` carries `modalities` tags including `image` and `video`, and the UI
 displays them. Actual image input is not wired into the composer yet.
 
-**Will my key survive a restart?**
-Yes, until you clear site data, use a different origin/port, or click **Forget API
-key**.
+**Will my keys survive a restart?**
+Yes, until you clear site data, use a different origin/port, or click **Forget all
+keys**.
 
 ---
 
@@ -929,6 +1143,7 @@ Not implemented yet, listed honestly:
 - **Token/cost accounting** — usage is captured per response but not summed.
 - **Editing a user message** — you can regenerate and delete, but not edit in place.
 - **Streaming for the non-stream path** — the buffered fallback waits for the full body.
+- **Per-provider model enable/disable UI** — hide unwanted models without editing JSON.
 
 ---
 

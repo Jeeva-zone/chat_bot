@@ -22,6 +22,7 @@ export default function Header({
   onToggleSidebar,
   hasMessages,
   keyReady,
+  keyLabel,
 }) {
   return (
     <header
@@ -67,15 +68,19 @@ export default function Header({
       </div>
 
       <span
-        className="chip"
-        title={keyReady ? "API key stored in this browser" : "No API key set"}
+        className="chip hidden sm:inline-flex"
+        title={
+          keyReady
+            ? "At least one provider is connected"
+            : "No API key set for this provider"
+        }
         style={keyReady ? undefined : { color: "var(--warn)" }}
       >
         <span
           className="h-1.5 w-1.5 rounded-full"
           style={{ background: keyReady ? "var(--ok)" : "var(--warn)" }}
         />
-        {keyReady ? "key ready" : "no key"}
+        {keyLabel || (keyReady ? "key ready" : "no key")}
       </span>
 
       <div className="ml-auto flex items-center gap-1">

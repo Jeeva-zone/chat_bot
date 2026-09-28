@@ -1,21 +1,15 @@
 // Server-side proxy for the OpenAI-compatible /chat/completions endpoint.
 // Keeping the call on the server means the API key never has to be exposed to
 // browser CORS restrictions, and streaming passes straight through.
+//
+// Works with any provider: the client sends the resolved endpoint, key and any
+// provider-specific headers (e.g. OpenRouter's HTTP-Referer / X-Title).
+
+import { normalizeEndpoint, buildHeaders, extractErrorDetail } from "@/lib/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-
-const DEFAULT_ENDPOINT = "https://tokenharbor.ai/v1/chat/completions";
-
-function normalizeEndpoint(raw) {
-  const url = String(raw || DEFAULT_ENDPOINT).trim();
-  if (/^https?:\/\//i.test(url)) return url;
-  // Accept bare hosts or base URLs and finish the path for the user.
-  const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-  if (/\/chat\/completions\/?$/.test(withScheme)) return withScheme;
-  return withScheme.replace(/\/+$/, "") + "/chat/completions";
-}
 
 export async function POST(req) {
   let payload;
@@ -34,11 +28,15 @@ export async function POST(req) {
     max_tokens = 2048,
     top_p,
     stream = true,
+    headers: extraHeaders,
   } = payload || {};
 
   if (!apiKey) {
     return Response.json(
-      { error: "Missing API key. Add it in Settings." },
+      {
+        error:
+          "Missing API key for this provider. Add it in Settings → Providers.",
+      },
       { status: 401 }
     );
   }
@@ -54,7 +52,12 @@ export async function POST(req) {
   const body = {
     model,
     messages: messages.map((m) => ({
-      role: m.role === "system" ? "system" : m.role === "assistant" ? "assistant" : "user",
+      role:
+        m.role === "system"
+          ? "system"
+          : m.role === "assistant"
+          ? "assistant"
+          : "user",
       content: String(m.content ?? ""),
     })),
     temperature: Number(temperature),
@@ -68,8 +71,7 @@ export async function POST(req) {
     upstream = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        ...buildHeaders(apiKey, extraHeaders),
         Accept: stream ? "text/event-stream" : "application/json",
       },
       body: JSON.stringify(body),
@@ -98,10 +100,12 @@ export async function POST(req) {
     }
     return Response.json(
       {
-        error: `Upstream error ${upstream.status} ${upstream.statusText || ""}`.trim(),
+        error: `Upstream error ${upstream.status} ${
+          upstream.statusText || ""
+        }`.trim(),
         status: upstream.status,
         endpoint: url,
-        detail: detail.slice(0, 2000),
+        detail: extractErrorDetail(detail),
       },
       { status: upstream.status || 502 }
     );

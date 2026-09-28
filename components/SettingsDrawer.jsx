@@ -2,11 +2,7 @@
 
 import { useRef, useState } from "react";
 import {
-  AlertTriangle,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  KeyRound,
+  FileJson,
   Loader2,
   RefreshCw,
   Settings2,
@@ -14,15 +10,20 @@ import {
   Trash2,
   Upload,
   X,
-  Zap,
 } from "lucide-react";
-import { testConnection } from "@/lib/client";
+import ProvidersPanel from "./ProvidersPanel";
 
-function Section({ title, children, hint }) {
+function Section({ title, children, hint, icon: Icon }) {
   return (
-    <div className="border-t px-4 py-4 first:border-t-0" style={{ borderColor: "var(--line)" }}>
+    <div
+      className="border-t px-4 py-4 first:border-t-0"
+      style={{ borderColor: "var(--line)" }}
+    >
       <div className="mb-3">
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="flex items-center gap-2 text-sm font-semibold">
+          {Icon && <Icon size={15} style={{ color: "var(--brand)" }} />}
+          {title}
+        </h3>
         {hint && (
           <p className="mt-0.5 text-xs" style={{ color: "var(--faint)" }}>
             {hint}
@@ -39,34 +40,24 @@ export default function SettingsDrawer({
   onClose,
   settings,
   setSettings,
-  apiKey,
-  setApiKey,
-  modelConfig,
+  config,
+  providerKeys,
+  onProviderKeyChange,
+  customProvider,
+  onCustomProviderChange,
+  liveModels,
+  onLiveModels,
   onReloadModels,
   onModelsFile,
   modelsError,
   loadingModels,
   onClearHistory,
+  onForgetAllKeys,
 }) {
-  const [showKey, setShowKey] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState(null);
   const [remoteUrl, setRemoteUrl] = useState("");
   const fileRef = useRef(null);
 
   const update = (patch) => setSettings((s) => ({ ...s, ...patch }));
-
-  const runTest = async () => {
-    setTesting(true);
-    setResult(null);
-    const res = await testConnection({
-      apiKey,
-      endpoint: settings.endpoint,
-      model: modelConfig?.defaultModelId,
-    });
-    setResult(res);
-    setTesting(false);
-  };
 
   const pickFile = (e) => {
     const file = e.target.files?.[0];
@@ -88,7 +79,7 @@ export default function SettingsDrawer({
         style={{ background: "var(--panel)", borderLeft: "1px solid var(--line)" }}
       >
         <header
-          className="sticky top-0 flex items-center gap-2 px-4 py-3"
+          className="sticky top-0 z-10 flex items-center gap-2 px-4 py-3"
           style={{
             background: "var(--panel)",
             borderBottom: "1px solid var(--line)",
@@ -101,94 +92,26 @@ export default function SettingsDrawer({
           </button>
         </header>
 
-        {/* ---- API credentials ---- */}
+        {/* ---- Providers ---- */}
         <Section
-          title="API credentials"
-          hint="Stored only in this browser's localStorage. Requests are proxied through the app server, so no CORS issues."
+          title="API providers"
+          hint="Keys are stored in this browser's localStorage only. All requests are proxied through the app server, so there are no CORS issues."
         >
-          <label className="label" htmlFor="apikey">
-            Token Harbor API key
-          </label>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                id="apikey"
-                className="field pr-9 font-mono text-xs"
-                type={showKey ? "text" : "password"}
-                placeholder="thk_live_…"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1"
-                style={{ color: "var(--faint)" }}
-                onClick={() => setShowKey((v) => !v)}
-                title={showKey ? "Hide key" : "Show key"}
-              >
-                {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-            <button className="btn" onClick={runTest} disabled={testing || !apiKey}>
-              {testing ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
-              {testing ? "Testing…" : "Test"}
-            </button>
-          </div>
-
-          <div className="mt-3">
-            <label className="label" htmlFor="endpoint">
-              Chat completions endpoint
-            </label>
-            <input
-              id="endpoint"
-              className="field font-mono text-xs"
-              value={settings.endpoint}
-              onChange={(e) => update({ endpoint: e.target.value })}
-              spellCheck={false}
-            />
-          </div>
-
-          {result && (
-            <div
-              className="mt-3 rounded-lg border p-3 text-xs"
-              style={{
-                borderColor: result.ok ? "var(--ok)" : "var(--err)",
-                background: result.ok ? "rgba(15,153,96,0.07)" : "rgba(217,45,32,0.07)",
-              }}
-            >
-              <div className="flex items-start gap-2">
-                {result.ok ? (
-                  <CheckCircle2 size={15} style={{ color: "var(--ok)" }} />
-                ) : (
-                  <AlertTriangle size={15} style={{ color: "var(--err)" }} />
-                )}
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold" style={{ color: result.ok ? "var(--ok)" : "var(--err)" }}>
-                    {result.ok
-                      ? result.message || "Connected successfully! Status: 200 OK"
-                      : result.error || "Connection failed"}
-                  </p>
-                  <div className="mt-1 space-y-0.5 font-mono text-[11px]" style={{ color: "var(--muted)" }}>
-                    <p>endpoint: {result.endpoint}</p>
-                    <p>status: {result.status ?? "n/a"} {result.statusText || ""}</p>
-                    <p>latency: {result.latencyMs ?? "n/a"} ms</p>
-                    {result.model && <p>model: {result.model}</p>}
-                    {result.snippet && <p>reply: “{result.snippet}”</p>}
-                    {result.detail && (
-                      <p className="whitespace-pre-wrap break-words">detail: {result.detail}</p>
-                    )}
-                    {result.hint && <p>hint: {result.hint}</p>}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          <ProvidersPanel
+            config={config}
+            providerKeys={providerKeys}
+            onProviderKeyChange={onProviderKeyChange}
+            customProvider={customProvider}
+            onCustomProviderChange={onCustomProviderChange}
+            liveModels={liveModels}
+            onLiveModels={onLiveModels}
+          />
         </Section>
 
-        {/* ---- Model registry ---- */}
+        {/* ---- Model registry source ---- */}
         <Section
-          title="Model registry"
+          icon={FileJson}
+          title="Model registry source"
           hint="models.json is parsed at runtime — swap the file or point at a URL and the pickers update."
         >
           <div className="flex flex-wrap items-center gap-2">
@@ -206,8 +129,16 @@ export default function SettingsDrawer({
               className="hidden"
               onChange={pickFile}
             />
-            <button className="btn btn-xs" onClick={onReloadModels} disabled={loadingModels}>
-              {loadingModels ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+            <button
+              className="btn btn-xs"
+              onClick={() => onReloadModels()}
+              disabled={loadingModels}
+            >
+              {loadingModels ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <RefreshCw size={13} />
+              )}
               Reload
             </button>
             <button
@@ -232,7 +163,8 @@ export default function SettingsDrawer({
               className="btn btn-xs"
               onClick={() => {
                 if (!remoteUrl.trim()) return;
-                const proxied = "/api/models?url=" + encodeURIComponent(remoteUrl.trim());
+                const proxied =
+                  "/api/models?url=" + encodeURIComponent(remoteUrl.trim());
                 update({ modelsUrl: proxied });
                 onReloadModels(proxied);
               }}
@@ -246,23 +178,25 @@ export default function SettingsDrawer({
               source: <span className="font-mono">{settings.modelsUrl}</span>
             </p>
             {modelsError ? (
-              <p className="mt-1 flex items-center gap-1 text-xs" style={{ color: "var(--err)" }}>
+              <p
+                className="mt-1 flex items-center gap-1 text-xs"
+                style={{ color: "var(--err)" }}
+              >
                 <ShieldAlert size={13} /> {modelsError}
               </p>
             ) : (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {(modelConfig?.models || []).map((m) => (
-                  <span key={m.id} className="chip" title={m.id}>
-                    {m.label}
-                    <span className="font-mono text-[10px]" style={{ color: "var(--faint)" }}>
-                      {m.id}
+              <div className="mt-2 space-y-1">
+                {(config?.providers || []).map((p) => (
+                  <div key={p.key} className="text-xs">
+                    <span className="font-semibold">{p.label}</span>
+                    <span className="ml-1.5" style={{ color: "var(--faint)" }}>
+                      {p.models.length} models
                     </span>
-                    {!m.enabled && <span style={{ color: "var(--warn)" }}>(disabled)</span>}
-                  </span>
+                  </div>
                 ))}
-                {!modelConfig?.models?.length && (
+                {!config?.providers?.length && (
                   <span className="text-xs" style={{ color: "var(--faint)" }}>
-                    No models loaded
+                    No providers loaded
                   </span>
                 )}
               </div>
@@ -300,7 +234,9 @@ export default function SettingsDrawer({
                 step="16"
                 className="field"
                 value={settings.maxTokens}
-                onChange={(e) => update({ maxTokens: Number(e.target.value) || 2048 })}
+                onChange={(e) =>
+                  update({ maxTokens: Number(e.target.value) || 2048 })
+                }
               />
             </div>
           </div>
@@ -330,7 +266,8 @@ export default function SettingsDrawer({
             <button
               className="btn btn-xs"
               onClick={() => {
-                if (confirm("Clear the conversation in this browser?")) onClearHistory();
+                if (confirm("Clear the conversation in this browser?"))
+                  onClearHistory();
               }}
             >
               <Trash2 size={13} /> Clear conversation
@@ -338,17 +275,17 @@ export default function SettingsDrawer({
             <button
               className="btn btn-xs"
               onClick={() => {
-                if (confirm("Remove the stored API key from this browser?")) {
-                  setApiKey("");
-                  setResult(null);
+                if (confirm("Remove every stored API key from this browser?")) {
+                  onForgetAllKeys();
                 }
               }}
             >
-              <KeyRound size={13} /> Forget API key
+              <Trash2 size={13} /> Forget all keys
             </button>
           </div>
           <p className="mt-2 text-[11px]" style={{ color: "var(--faint)" }}>
-            Keys and settings live in localStorage under the <code>th-studio:</code> prefix.
+            Keys and settings live in localStorage under the{" "}
+            <code>th-studio:</code> prefix.
           </p>
         </Section>
 

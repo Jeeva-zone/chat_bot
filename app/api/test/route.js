@@ -1,30 +1,42 @@
-// Minimal ("ping") request used by the Test Connection button.
+// Minimal ("ping") request used by the per-provider Test button.
 // Sends a 1-message request with max_tokens=5 and reports status + latency.
+// Works for any provider: the client supplies endpoint, key and headers.
+
+import { normalizeEndpoint, buildHeaders, extractErrorDetail } from "@/lib/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const DEFAULT_ENDPOINT = "https://tokenharbor.ai/v1/chat/completions";
-
-function normalizeEndpoint(raw) {
-  const url = String(raw || DEFAULT_ENDPOINT).trim();
-  const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-  if (/\/chat\/completions\/?$/.test(withScheme)) return withScheme;
-  return withScheme.replace(/\/+$/, "") + "/chat/completions";
-}
 
 export async function POST(req) {
   let payload;
   try {
     payload = await req.json();
   } catch {
-    return Response.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+    return Response.json(
+      { ok: false, error: "Invalid JSON body" },
+      { status: 400 }
+    );
   }
 
-  const { apiKey, endpoint, model } = payload || {};
+  const { apiKey, endpoint, model, headers: extraHeaders, providerLabel } = payload || {};
+
   if (!apiKey) {
     return Response.json(
-      { ok: false, error: "No API key provided.", hint: "Paste your Token Harbor key first." },
+      {
+        ok: false,
+        error: "No API key provided for this provider.",
+        hint: "Paste the key into the provider card first.",
+      },
+      { status: 400 }
+    );
+  }
+  if (!endpoint) {
+    return Response.json(
+      {
+        ok: false,
+        error: "No endpoint configured for this provider.",
+        hint: "Set the base URL in the provider card.",
+      },
       { status: 400 }
     );
   }
@@ -35,10 +47,7 @@ export async function POST(req) {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: buildHeaders(apiKey, extraHeaders),
       body: JSON.stringify({
         model: model || undefined,
         messages: [{ role: "user", content: "Say OK" }],
@@ -52,13 +61,8 @@ export async function POST(req) {
     const text = await res.text();
 
     if (!res.ok) {
-      let detail = text.slice(0, 600);
-      try {
-        const j = JSON.parse(text);
-        detail = j?.error?.message || j?.message || detail;
-      } catch {
-        /* keep raw */
-      }
+      const detail = extractErrorDetail(text);
+      const label = providerLabel ? `${providerLabel}: ` : "";
       return Response.json(
         {
           ok: false,
@@ -68,8 +72,10 @@ export async function POST(req) {
           endpoint: url,
           error:
             res.status === 401 || res.status === 403
-              ? "Connection failed: invalid or unauthorized API key."
-              : `Connection failed: HTTP ${res.status} ${res.statusText || ""}`.trim(),
+              ? `${label}connection failed — invalid or unauthorized API key.`
+              : `${label}connection failed — HTTP ${res.status} ${
+                  res.statusText || ""
+                }`.trim(),
           detail,
         },
         { status: 200 }
@@ -79,7 +85,8 @@ export async function POST(req) {
     let snippet = "";
     try {
       const j = JSON.parse(text);
-      snippet = j?.choices?.[0]?.message?.content || "";
+      const msg = j?.choices?.[0]?.message || {};
+      snippet = msg.content || msg.reasoning_content || "";
     } catch {
       snippet = text.slice(0, 120);
     }
@@ -102,7 +109,7 @@ export async function POST(req) {
         latencyMs: Date.now() - started,
         error: `Connection failed: ${err?.message || "network unreachable"}`,
         hint:
-          "Check the endpoint host, your firewall, or whether the provider is reachable from this machine.",
+          "Check the base URL, your firewall, or whether the provider is reachable from this machine.",
       },
       { status: 200 }
     );

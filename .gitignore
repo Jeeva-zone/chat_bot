@@ -45,3 +45,6 @@ snap*.txt
 shot-*.png
 stream*.txt
 page.html
+
+# local agent workspace data (not part of the app)
+/.workbuddy-ai/

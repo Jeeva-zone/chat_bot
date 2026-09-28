@@ -9,8 +9,9 @@ import {
   Wand2,
 } from "lucide-react";
 import { AGENT_PRESETS, makeAgent } from "@/lib/defaults";
+import ModelSelect from "./ModelSelect";
 
-function AgentCard({ agent, index, models, onChange, onRemove, onPreset }) {
+function AgentCard({ agent, index, config, providerKeys, onChange, onRemove, onPreset }) {
   const set = (patch) => onChange({ ...agent, ...patch });
 
   return (
@@ -61,18 +62,14 @@ function AgentCard({ agent, index, models, onChange, onRemove, onPreset }) {
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div>
           <span className="label">Model</span>
-          <select
-            className="field px-2 py-1 text-xs"
-            value={agent.model || models[0]?.id || ""}
-            onChange={(e) => set({ model: e.target.value })}
-          >
-            {models.length === 0 && <option value="">No models loaded</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} · {m.id}
-              </option>
-            ))}
-          </select>
+          <ModelSelect
+            config={config}
+            value={agent.model || ""}
+            onChange={(v) => set({ model: v })}
+            providerKeys={providerKeys}
+            className="px-2 py-1 text-xs"
+            showProviderTag
+          />
         </div>
         <div>
           <span className="label">
@@ -116,7 +113,7 @@ function AgentCard({ agent, index, models, onChange, onRemove, onPreset }) {
   );
 }
 
-export default function TeamBuilder({ team, setTeam, models }) {
+export default function TeamBuilder({ team, setTeam, config, providerKeys }) {
   const updateAgent = (id, patch) =>
     setTeam((t) => ({
       ...t,
@@ -168,7 +165,7 @@ export default function TeamBuilder({ team, setTeam, models }) {
                 makeAgent("developer"),
                 makeAgent("reviewer"),
               ],
-              synth: { model: models[0]?.id || "", systemPrompt: AGENT_PRESETS.synthesizer.systemPrompt, temperature: 0.4 },
+              synth: { model: "", systemPrompt: AGENT_PRESETS.synthesizer.systemPrompt, temperature: 0.4 },
             });
           }}
         >
@@ -186,7 +183,8 @@ export default function TeamBuilder({ team, setTeam, models }) {
           key={agent.id}
           agent={agent}
           index={i}
-          models={models}
+          config={config}
+          providerKeys={providerKeys}
           onChange={(patch) => updateAgent(agent.id, patch)}
           onRemove={() => removeAgent(agent.id)}
           onPreset={(p) => applyPreset(agent.id, p)}
@@ -223,20 +221,16 @@ export default function TeamBuilder({ team, setTeam, models }) {
         </p>
         <div className="mt-2">
           <span className="label">Model</span>
-          <select
-            className="field px-2 py-1 text-xs"
-            value={team.synth.model || models[0]?.id || ""}
-            onChange={(e) =>
-              setTeam((t) => ({ ...t, synth: { ...t.synth, model: e.target.value } }))
+          <ModelSelect
+            config={config}
+            value={team.synth.model || ""}
+            onChange={(v) =>
+              setTeam((t) => ({ ...t, synth: { ...t.synth, model: v } }))
             }
-          >
-            {models.length === 0 && <option value="">No models loaded</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} · {m.id}
-              </option>
-            ))}
-          </select>
+            providerKeys={providerKeys}
+            className="px-2 py-1 text-xs"
+            showProviderTag
+          />
         </div>
         <div className="mt-2">
           <span className="label">System prompt</span>
